@@ -1,0 +1,62 @@
+Algorithm Pseudocode
+====================
+
+This document describes the implementation details for the Reinforcement Learning agents
+used in the LunarLander-v3 environment, utilizing Tile Coding for function approximation.
+
+Hyperparameters extracted from tuned configurations:
+- iht_size: Size of the Index Hash Table for tiling.
+- n_tilings: Number of overlapping tilings.
+- Sintervals: Number of bins per state dimension.
+- gamma: Discount factor.
+- alpha_a: Main learning rate (Step size for weights/policy).
+- alpha_b: Secondary learning rate (used for baseline updates in REINFORCE).
+- lmbda: Trace decay parameter for Lambda SARSA.
+
+1. Semi Grad SARSA
+------------------
+1. Initialize weights w to zeros (or via qinit).
+2. For each episode:
+    a. Store S_0. Choose and store A_0 using epsilon-greedy policy derived from q(s,a,w).
+    b. T = inf.
+    c. For t = 0, 1, 2, ...:
+        i. If t < T:
+           Take action A_t, observe R_{t+1}, S_{t+1}.
+           If S_{t+1} is terminal: T = t + 1.
+           Else: Choose A_{t+1} using epsilon-greedy policy.
+        ii. tau = t - n + 1 (Time step being updated).
+        iii. If tau >= 0:
+             G = sum_{i=tau+1}^{min(tau+n, T)} gamma^{i-tau-1} * R_i
+             If tau + n < T: G = G + gamma^n * sum(w[phi(S_{tau+n}, A_{tau+n})])
+             alpha_tau = alpha_a / (1 + count(S_tau, A_tau))^alpha_b
+             w[phi(S_tau, A_tau)] = w[phi(S_tau, A_tau)] + (alpha_tau / n_tilings) * [G - q(S_tau, A_tau, w)]
+        iv. If tau == T - 1: Break.
+
+2. Lambda SARSA
+---------------
+1. Initialize weights w to zeros.
+2. For each episode:
+    a. z = 0 (Eligibility traces).
+    b. Initialize S. Choose A using epsilon-greedy policy derived from q(s,a,w).
+    c. For each step (using sparse updates for efficiency):
+        i. Take action A, observe R, S'.
+        ii. z = gamma * lmbda * z + grad_w(q(S, A, w))  [Accumulating Traces]
+        iii. delta = R - w^T * phi(S, A)
+        iv. If S' is terminal:
+            w = w + (alpha / n_tilings) * delta * z
+            Break.
+        v. Choose A' from S' using epsilon-greedy policy.
+        vi. delta = delta + gamma * w^T * phi(S', A')
+        vii. w = w + (alpha / n_tilings) * delta * z
+        viii. S = S', A = A'.
+
+3. REINFORCE
+------------
+1. For each episode:
+    a. Generate a full trajectory {S_0, A_0, R_1, ..., S_T} following pi(a|s, theta).
+    b. For each step t = 0 to T-1:
+        i. G = sum_{k=t+1}^{T} gamma^(k-t-1) * R_k
+        ii. v_hat = w_baseline^T * phi(S_t)
+        iii. delta = G - v_hat (Baseline error)
+        iv. w_baseline = w_baseline + (alpha_w / n_tilings) * delta * phi(S_t)
+        v. theta = theta + (alpha_theta / n_tilings) * gamma^t * delta * grad_ln_pi(A_t|S_t, theta)

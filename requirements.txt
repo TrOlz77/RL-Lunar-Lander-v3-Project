@@ -1,0 +1,13 @@
+gymnasium[classic_control]
+gymnasium[box2d]
+gymnasium[other]
+numpy
+scipy
+matplotlib
+scikit-learn
+pandas
+statsmodels
+tqdm
+joblib
+moviepy<2.0.0
+opencv-python
