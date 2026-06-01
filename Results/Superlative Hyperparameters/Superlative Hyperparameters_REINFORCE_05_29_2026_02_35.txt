@@ -1,1 +1,0 @@
-HP(alg_name='REINFORCE', env_name='LunarLander-v3', alpha_a=np.float64(0.05), alpha_b=np.float64(0.205), alpha_w_a=np.float64(0.055), alpha_w_b=np.float64(0.015), qinit=np.float64(0.035), qrange=(-1, 1), Sintervals=5, gamma=0.999, iht_size=262144, n_tilings=16, Z=10, delta_clip=10.0, M=500, test_freq=25, num_test_reps=30, offset=0)

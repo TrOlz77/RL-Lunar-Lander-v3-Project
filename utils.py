@@ -208,9 +208,13 @@ def run_lhd_experiment(hp_class, run_episode_fn, hparam_names, factor_names,
             elif name == 'Sintervals':
                 # Range [4, 20]
                 setattr(hp, name, int(val * 16) + 4)
-            elif name == 'alpha_a':
-                # Upper bound for the learning rate parameter
-                setattr(hp, name, val * 2.0)
+            elif name in ['alpha_a', 'alpha_w_a']:
+                # For REINFORCE, we need much smaller learning rates. 
+                # Using log-uniform scaling for learning rates is often better.
+                if "REINFORCE" in hp.alg_name:
+                    setattr(hp, name, 10 ** (val * 3 - 4)) # Adjusted Range [1e-4, 1e-1]
+                else:
+                    setattr(hp, name, val * 1.5) # Standard scaling for SARSA
             else:
                 setattr(hp, name, val)
         

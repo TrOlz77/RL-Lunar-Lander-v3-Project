@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import numpy as np
+import collections
 from datetime import datetime
 from dataclasses import dataclass
 # Import utilities
@@ -28,7 +29,7 @@ class HP:
     iht_size: int = 262144          # Allowed hash table size for tile coding
     n_tilings: int = 8              # Number of tilings for tile coding
     Z: int = 10                     # Number of independent statistical replications
-    delta_clip: float = 10.0        # TD error clipping for baseline stability
+    delta_clip: float = 50.0        # Increased clipping for LunarLander reward scales
     M: int = 500                    # Total episodes per replication
     test_freq: int = 25             # Frequency of evaluation milestones
     num_test_reps: int = 30         # Episodes per greedy policy evaluation
@@ -56,65 +57,59 @@ def run_episode(env, w, w_baseline, phi, hp: HP, episode_seed: int, episode_m: i
         action = np.random.choice(num_actions, p=probs)
         return action, probs
 
-    # 1. Generate an episode following the current policy
-    states_features = []
-    actions = []
-    rewards = []
+    # Initialize queues for state-action-reward sequence (Matches Professor's structure)
+    state_queue = collections.deque([])
+    action_queue = collections.deque([])
+    reward_queue = collections.deque([])
     
     state_cont, _ = env.reset(seed=episode_seed)
     terminated = truncated = False
     Gm = 0
     
+    # 1. Forward loop: Generate a full episode following policy pi(a|s, theta)
     while not (terminated or truncated):
         state_f = phi(state_cont)
         action, _ = get_action_and_probs(state_f)
         
-        next_state_cont, reward, terminated, truncated, _ = env.step(action)
-        
-        states_features.append(state_f)
-        actions.append(action)
-        rewards.append(reward)
-        
-        state_cont = next_state_cont
-        Gm += reward
+        state_queue.append(state_f)
+        action_queue.append(action)
 
-    # 2. Update policy (theta) and baseline (w_baseline)
-    T = len(rewards)
-    
-    # Pre-calculate discounted returns G_t
-    returns = np.zeros(T)
-    G = 0
-    # G_t is calculated as the sum of discounted rewards from time t+1 onwards
-    for t in reversed(range(T)):
-        G = rewards[t] + (hp.gamma * G)
-        returns[t] = G
-        
+        state_cont, reward, terminated, truncated, _ = env.step(action)
+        reward_queue.append(reward)
+        Gm += reward # Cumulative undiscounted reward for monitoring
+
+    # 2. Backward loop: REINFORCE update with Baseline
     # Step sizes scaled by n_tilings for Linear VFA
     alpha_theta = hp.alpha(episode_m) / hp.n_tilings
     alpha_w = hp.alpha_w(episode_m) / hp.n_tilings
     
-    for t in range(T):
-        G_t = returns[t]          # G
-        sf = states_features[t]   # x(S_t)
-        a_t = actions[t]          # A_t
+    G_discounted = 0
+    # Process the episode backwards to correctly associate returns with states
+    while len(state_queue) > 0:
+        sf = state_queue.pop()          # S_t (starting from T-1)
+        a_t = action_queue.pop()
+        r_t = reward_queue.pop()        # R_{t+1}
+
+        # Iteratively calculate the return G from time t (Matches Professor's structure)
+        G_discounted = r_t + (hp.gamma * G_discounted)
         
-        # 1. delta = G - v(S_t, w)
+        # 1. Compute TD error (delta) = G - Vhat(s, w)
         v_hat = w_baseline[sf, 0].sum()
-        delta = G_t - v_hat
+        delta = G_discounted - v_hat
         
-        # Stability clipping for LunarLander-v3
+        # Stability clipping
         delta_clip = np.clip(delta, -hp.delta_clip, hp.delta_clip)
         
-        # 2. Update baseline weights: w <- w + alpha_w * delta * grad(v(S_t, w))
+        # 2. Update baseline weights
         w_baseline[sf, 0] += alpha_w * delta_clip
         
-        # 3. Update policy weights: theta <- theta + alpha_theta * gamma^t * delta * grad(ln pi(A_t|S_t, theta))
+        # 3. Update policy weights (theta)
         _, pi = get_action_and_probs(sf)
-        
         grad_log_pi = -pi
         grad_log_pi[a_t] += 1.0
         
-        w[sf, :] += alpha_theta * (hp.gamma ** t) * delta_clip * grad_log_pi
+        # The index t is represented by len(state_queue) in the backward pass
+        w[sf, :] += alpha_theta * (hp.gamma ** len(state_queue)) * delta_clip * grad_log_pi
         
     return Gm
 
@@ -131,8 +126,9 @@ if __name__ == "__main__":
 
     factors, scores, names = run_lhd_experiment(
         HP, run_episode, 
-        hparam_names=['alpha_a', 'alpha_b', 'alpha_w_a', 'alpha_w_b', 'qinit', 'n_tilings', 'Sintervals'], 
+        # Removed alpha_b/alpha_w_b from LHD to prevent vanishing gradients
+        hparam_names=['alpha_a', 'alpha_w_a', 'qinit', 'n_tilings', 'Sintervals'], 
         n_runs=100, # Total configurations for hyperparameter search
-        factor_names=['Alpha_a', 'Alpha_b', 'Alpha_W_a', 'Alpha_W_b', 'Q_Init', 'N_Tilings', 'S_Intervals'],
+        factor_names=['Alpha_a', 'Alpha_W_a', 'Q_Init', 'N_Tilings', 'S_Intervals'],
     )
     analyze_lhd_results(factors, scores, names, hp.alg_name)
